@@ -5,61 +5,83 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Sol y luna</title>
 <style>
-:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--ink:#fff;--glass:rgba(10,14,30,.45)}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
-html,body{height:100%;margin:0;background:#0a0e1e;overflow:hidden;font-family:Georgia,"Times New Roman",serif;color:var(--ink);touch-action:none}
-canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+:root{box-sizing:border-box;--glass:rgba(10,14,40,.5)}
+html,body{height:100%;margin:0;background:#0b1040;overflow:hidden;font-family:Georgia,"Times New Roman",serif;color:#fff;touch-action:none}
+video,canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+video{object-fit:cover;transform:scaleX(-1);opacity:.9}
 .ui{position:fixed;left:0;right:0;bottom:0;padding:16px 20px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:10px;align-items:center}
 .hint{background:var(--glass);padding:8px 14px;border-radius:999px;font-size:15px;text-align:center;backdrop-filter:blur(6px)}
-button{font:inherit;font-size:16px;color:var(--ink);background:var(--glass);border:1px solid rgba(255,255,255,.4);padding:10px 18px;border-radius:999px;cursor:pointer}
+button{font:inherit;font-size:16px;color:#fff;background:var(--glass);border:1px solid rgba(255,255,255,.45);padding:10px 18px;border-radius:999px;cursor:pointer}
 button:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:3px}
-input[type=range]{width:min(420px,86%);accent-color:#ffd27a}
+input[type=range]{width:min(420px,86%);accent-color:#ff9a7a}
 </style>
 </head>
 <body>
+<video id="v" playsinline muted autoplay></video>
 <canvas id="c"></canvas>
 <div class="ui">
-  <div class="hint" id="hint">Gira el móvil de lado: el sol baja y sale la luna</div>
-  <button id="btn">Activar sensor de movimiento</button>
+  <div class="hint" id="hint">Gira el móvil: el sol baja y sale la luna</div>
+  <button id="btn">Activar espejo y sensor</button>
   <input type="range" id="sl" min="0" max="100" value="0" aria-label="Giro">
 </div>
 <script>
-const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),vid=document.getElementById('v');
 const sl=document.getElementById('sl'),btn=document.getElementById('btn'),hint=document.getElementById('hint');
 let W,H,dpr,target=0,t=0;
-const stars=Array.from({length:90},()=>({x:Math.random(),y:Math.random()*.65,r:Math.random()*1.4+.4,p:Math.random()*6}));
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,k)=>a+(b-a)*k;
 function size(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
 addEventListener('resize',size);size();
-const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
-const hex=h=>[1,3,5].map(i=>parseInt(h.substr(i,2),16));
-function mix(a,b,k){a=hex(a);b=hex(b);return `rgb(${a.map((v,i)=>Math.round(v+(b[i]-v)*k)).join(',')})`}
-const day=['#3b8fe6','#bfe6ff'],dusk=['#5a3b7a','#ff9a5a'],night=['#040714','#1a2756'];
-function sky(t){const A=t<.5?[day,dusk]:[dusk,night],k=t<.5?t*2:(t-.5)*2;return[mix(A[0][0],A[1][0],k),mix(A[0][1],A[1][1],k)]}
-function draw(time){
+// texturas: la luna se genera con ruido (maria y crateres); si subes moon.png o sun.png junto al index, se usan en su lugar
+const h=(x,y)=>{const q=Math.sin(x*127.1+y*311.7)*43758.5453;return q-Math.floor(q)};
+const vn=(x,y)=>{const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf);return lerp(lerp(h(xi,yi),h(xi+1,yi),u),lerp(h(xi,yi+1),h(xi+1,yi+1),u),v)};
+const fbm=(x,y)=>{let a=.5,q=0,f=1;for(let i=0;i<5;i++){q+=a*vn(x*f,y*f);f*=2;a*=.5}return q};
+const moonTex=(()=>{const N=300,c=document.createElement('canvas');c.width=c.height=N;const m=c.getContext('2d'),im=m.createImageData(N,N);
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){const dx=(x-N/2)/(N/2),dy=(y-N/2)/(N/2),r=Math.hypot(dx,dy),i=(y*N+x)*4;
+    if(r>1)continue;
+    const mare=clamp((fbm(dx*2.2+5,dy*2.2+3)-.48)*5),det=fbm(dx*14,dy*14);
+    const b=clamp((.86-mare*.38+(det-.5)*.22)*Math.pow(1-r*r*.55,.5)*1.05)*255;
+    im.data[i]=b;im.data[i+1]=b*.97;im.data[i+2]=b*.92;im.data[i+3]=255*clamp((1-r)*40)}
+  m.putImageData(im,0,0);
+  for(let k=0;k<26;k++){const a=Math.random()*6.28,d=Math.sqrt(Math.random())*.85,cx=N/2+Math.cos(a)*d*N/2,cy=N/2+Math.sin(a)*d*N/2,cr=3+Math.random()*9;
+    m.strokeStyle='rgba(255,255,255,.22)';m.fillStyle='rgba(60,60,70,.16)';m.lineWidth=1.2;m.beginPath();m.arc(cx,cy,cr,0,7);m.fill();m.stroke()}
+  return c})();
+const ext={};['moon','sun'].forEach(n=>{const i=new Image();i.onload=()=>{ext[n]=i};i.src=n+'.png'});
+const rgb=(r,g,b,a=1)=>`rgba(${r|0},${g|0},${b|0},${a})`;
+function orb(x,y,r,core,mid,a){
+  const g=ctx.createRadialGradient(x,y,0,x,y,r);
+  g.addColorStop(0,core);g.addColorStop(.25,mid);g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.globalAlpha=a;ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();ctx.globalAlpha=1}
+function draw(){
   t+=(target-t)*.08;
-  const [top,bot]=sky(t),g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,top);g.addColorStop(.75,bot);
+  ctx.globalCompositeOperation='source-over';ctx.clearRect(0,0,W,H);
+  // tinte azul que se oscurece con la noche
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,`rgba(${Math.round(lerp(70,30,t))},${Math.round(lerp(90,25,t))},255,${lerp(.42,.55,t)})`);
+  g.addColorStop(1,`rgba(${Math.round(lerp(110,60,t))},${Math.round(lerp(80,40,t))},${Math.round(lerp(220,170,t))},${lerp(.3,.45,t)})`);
   ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
-  const hz=H*.74,R=Math.min(W,H)*.11;
-  const sa=clamp((t-.3)/.5);
-  stars.forEach(s=>{ctx.globalAlpha=sa*(.55+.45*Math.sin(time/700+s.p));ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(s.x*W,s.y*H,s.r,0,7);ctx.fill()});
-  ctx.globalAlpha=1;
-  // sol
-  const st=clamp(t/.75),sx=W*(.5-.18*st),sy=H*.26+st*(hz-H*.26+R*2.2);
-  let sg=ctx.createRadialGradient(sx,sy,R*.4,sx,sy,R*3.4);sg.addColorStop(0,'rgba(255,220,130,.75)');sg.addColorStop(1,'rgba(255,170,80,0)');
-  ctx.fillStyle=sg;ctx.beginPath();ctx.arc(sx,sy,R*3.4,0,7);ctx.fill();
-  ctx.fillStyle=mix('#fff3b0','#ff7a2e',st);ctx.beginPath();ctx.arc(sx,sy,R,0,7);ctx.fill();
-  // luna
-  const mt=clamp((t-.3)/.7),mx=W*(.5+.18*mt),my=hz+R*2.4-mt*(hz+R*2.4-H*.24);
-  let mg=ctx.createRadialGradient(mx,my,R*.5,mx,my,R*3);mg.addColorStop(0,'rgba(190,210,255,.45)');mg.addColorStop(1,'rgba(190,210,255,0)');
-  ctx.fillStyle=mg;ctx.beginPath();ctx.arc(mx,my,R*3,0,7);ctx.fill();
-  ctx.fillStyle='#eef1fb';ctx.beginPath();ctx.arc(mx,my,R*.85,0,7);ctx.fill();
-  ctx.fillStyle='rgba(150,160,190,.45)';
-  [[-.3,-.2,.2],[.25,.1,.15],[-.1,.35,.12]].forEach(c=>{ctx.beginPath();ctx.arc(mx+c[0]*R,my+c[1]*R,c[2]*R,0,7);ctx.fill()});
-  // colinas
-  ctx.fillStyle=mix('#1f3d2b','#05080f',t);
-  ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,hz);
-  for(let x=0;x<=W;x+=12)ctx.lineTo(x,hz+Math.sin(x/W*5+1)*H*.018+Math.sin(x/W*13)*H*.006);
-  ctx.lineTo(W,H);ctx.fill();
+  ctx.globalCompositeOperation='lighter';
+  const R=Math.min(W,H)*.2;
+  // orbita circular: el sol y la luna van en lados opuestos del mismo circulo
+  const cx=W*.5,cy=H*.78,Rad=Math.min(W*.8,H*.5),psi=lerp(-.4,-.4+Math.PI,t);
+  const pos=p=>[cx+Rad*Math.sin(p),cy-Rad*Math.cos(p)];
+  const [sx,sy]=pos(psi),[mx,my]=pos(psi+Math.PI);
+  const low=clamp((sy-(cy-Rad))/(Rad*1.2)); // 0 alto, 1 cerca del horizonte
+  orb(sx,sy,R*1.7,'rgba(255,248,230,1)',rgb(255,lerp(170,90,low),lerp(120,50,low),.5),1);
+  const rs=R*.42;
+  ctx.save();ctx.translate(sx,sy);ctx.scale(1,1-.14*low); // aplastado cerca del horizonte
+  if(ext.sun){ctx.globalCompositeOperation='lighter';ctx.drawImage(ext.sun,-rs*2.2,-rs*2.2,rs*4.4,rs*4.4)}
+  else{ctx.globalCompositeOperation='source-over';
+    const g=ctx.createRadialGradient(0,0,0,0,0,rs);
+    g.addColorStop(0,rgb(255,lerp(250,205,low),lerp(225,125,low)));
+    g.addColorStop(.75,rgb(255,lerp(215,135,low),lerp(140,55,low)));
+    g.addColorStop(.96,rgb(lerp(255,225,low),lerp(165,70,low),lerp(80,25,low)));
+    g.addColorStop(1,rgb(255,120,40,0));
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,rs,0,7);ctx.fill()}
+  ctx.restore();
+  orb(mx,my,R*1.3,'rgba(190,210,255,.45)','rgba(120,150,255,.25)',1);
+  const mr=R*.5;ctx.globalCompositeOperation='source-over';
+  ctx.drawImage(ext.moon||moonTex,mx-mr,my-mr,mr*2,mr*2);
   requestAnimationFrame(draw)
 }
 requestAnimationFrame(draw);
@@ -72,15 +94,20 @@ addEventListener('pointerup',()=>drag=null);
 let live=false;
 function onOri(e){if(e.gamma==null)return;live=true;set(Math.abs(e.gamma)/70);hint.textContent='Cuanto más gires el móvil, más se hace de noche'}
 async function enable(){
+  let sensor=false;
   try{
     if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){
-      const r=await DeviceOrientationEvent.requestPermission();
-      if(r!=='granted'){hint.textContent='Permiso denegado. Usa el deslizador o arrastra la pantalla';return}
-    }
-    addEventListener('deviceorientation',onOri);
-    btn.style.display='none';
-    setTimeout(()=>{if(!live)hint.textContent='Sin sensor aquí. Usa el deslizador o arrastra la pantalla'},1500);
-  }catch(err){hint.textContent='No se pudo activar el sensor. Usa el deslizador'}
+      sensor=(await DeviceOrientationEvent.requestPermission())==='granted';
+    }else sensor=true;
+    if(sensor)addEventListener('deviceorientation',onOri);
+  }catch(e){}
+  try{
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+    vid.srcObject=s;vid.play();
+  }catch(e){hint.textContent='Sin cámara. Se ve solo el cielo azul'}
+  btn.style.display='none';
+  if(!sensor)hint.textContent='Sin sensor. Usa el deslizador o arrastra la pantalla';
+  else setTimeout(()=>{if(!live)hint.textContent='Sin sensor aquí. Usa el deslizador o arrastra'},1500);
 }
 btn.addEventListener('click',enable);
 </script>
