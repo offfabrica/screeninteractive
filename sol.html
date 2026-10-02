@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sol y luna</title>
+<style>
+:root{box-sizing:border-box;--glass:rgba(10,14,40,.5)}
+html,body{height:100%;margin:0;background:#0b1040;overflow:hidden;font-family:Georgia,"Times New Roman",serif;color:#fff;touch-action:none}
+video,canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+video{object-fit:cover;transform:scaleX(-1);opacity:.9}
+.ui{position:fixed;left:0;right:0;bottom:0;padding:16px 20px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:10px;align-items:center}
+.hint{background:var(--glass);padding:8px 14px;border-radius:999px;font-size:15px;text-align:center;backdrop-filter:blur(6px)}
+button{font:inherit;font-size:16px;color:#fff;background:var(--glass);border:1px solid rgba(255,255,255,.45);padding:10px 18px;border-radius:999px;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:3px}
+input[type=range]{width:min(420px,86%);accent-color:#ff9a7a}
+</style>
+</head>
+<body>
+<video id="v" playsinline muted autoplay></video>
+<canvas id="c"></canvas>
+<div class="ui">
+  <div class="hint" id="hint">Gira el móvil: el sol baja y sale la luna</div>
+  <button id="btn">Activar espejo y sensor</button>
+  <div class="hint" id="hand">Activa la cámara para controlar el sol con la mano</div>
+  <input type="range" id="sl" min="0" max="100" value="0" aria-label="Giro">
+</div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),vid=document.getElementById('v');
+const handEl=document.getElementById('hand'),sl=document.getElementById('sl'),btn=document.getElementById('btn'),hint=document.getElementById('hint');
+let W,H,dpr,target=0,t=0;
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,k)=>a+(b-a)*k;
+function size(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',size);size();
+// texturas: la luna se genera con ruido (maria y crateres); si subes moon.png o sun.png junto al index, se usan en su lugar
+const h=(x,y)=>{const q=Math.sin(x*127.1+y*311.7)*43758.5453;return q-Math.floor(q)};
+const vn=(x,y)=>{const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf);return lerp(lerp(h(xi,yi),h(xi+1,yi),u),lerp(h(xi,yi+1),h(xi+1,yi+1),u),v)};
+const fbm=(x,y)=>{let a=.5,q=0,f=1;for(let i=0;i<5;i++){q+=a*vn(x*f,y*f);f*=2;a*=.5}return q};
+const moonTex=(()=>{const N=300,c=document.createElement('canvas');c.width=c.height=N;const m=c.getContext('2d'),im=m.createImageData(N,N);
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){const dx=(x-N/2)/(N/2),dy=(y-N/2)/(N/2),r=Math.hypot(dx,dy),i=(y*N+x)*4;
+    if(r>1)continue;
+    const mare=clamp((fbm(dx*2.2+5,dy*2.2+3)-.48)*5),det=fbm(dx*14,dy*14);
+    const b=clamp((.86-mare*.38+(det-.5)*.22)*Math.pow(1-r*r*.55,.5)*1.05)*255;
+    im.data[i]=b;im.data[i+1]=b*.97;im.data[i+2]=b*.92;im.data[i+3]=255*clamp((1-r)*40)}
+  m.putImageData(im,0,0);
+  for(let k=0;k<26;k++){const a=Math.random()*6.28,d=Math.sqrt(Math.random())*.85,cx=N/2+Math.cos(a)*d*N/2,cy=N/2+Math.sin(a)*d*N/2,cr=3+Math.random()*9;
+    m.strokeStyle='rgba(255,255,255,.22)';m.fillStyle='rgba(60,60,70,.16)';m.lineWidth=1.2;m.beginPath();m.arc(cx,cy,cr,0,7);m.fill();m.stroke()}
+  return c})();
+const ext={};['moon','sun'].forEach(n=>{const i=new Image();i.onload=()=>{ext[n]=i};i.src=n+'.png'});
+const rgb=(r,g,b,a=1)=>`rgba(${r|0},${g|0},${b|0},${a})`;
+function orb(x,y,r,core,mid,a){
+  const g=ctx.createRadialGradient(x,y,0,x,y,r);
+  g.addColorStop(0,core);g.addColorStop(.25,mid);g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.globalAlpha=a;ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();ctx.globalAlpha=1}
+let sizeK=1,sizeT=1;
+function draw(){
+  t+=(target-t)*.08;
+  ctx.globalCompositeOperation='source-over';ctx.clearRect(0,0,W,H);
+  // tinte azul que se oscurece con la noche
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,`rgba(${Math.round(lerp(70,30,t))},${Math.round(lerp(90,25,t))},255,${lerp(.42,.55,t)})`);
+  g.addColorStop(1,`rgba(${Math.round(lerp(110,60,t))},${Math.round(lerp(80,40,t))},${Math.round(lerp(220,170,t))},${lerp(.3,.45,t)})`);
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.globalCompositeOperation='lighter';
+  const R=Math.min(W,H)*.2;sizeK+=(sizeT-sizeK)*.15;const Rs=R*sizeK;
+  // orbita circular: el sol y la luna van en lados opuestos del mismo circulo
+  const cx=W*.5,cy=H*.78,Rad=Math.min(W*.8,H*.5),psi=lerp(-.4,-.4+Math.PI,t);
+  const pos=p=>[cx+Rad*Math.sin(p),cy-Rad*Math.cos(p)];
+  const [sx,sy]=pos(psi),[mx,my]=pos(psi+Math.PI);
+  const low=clamp((sy-(cy-Rad))/(Rad*1.2)); // 0 alto, 1 cerca del horizonte
+  orb(sx,sy,Rs*1.7,'rgba(255,248,230,1)',rgb(255,lerp(170,90,low),lerp(120,50,low),.5),1);
+  const rs=Rs*.42;
+  ctx.save();ctx.translate(sx,sy);ctx.scale(1,1-.14*low); // aplastado cerca del horizonte
+  if(ext.sun){ctx.globalCompositeOperation='lighter';ctx.drawImage(ext.sun,-rs*2.2,-rs*2.2,rs*4.4,rs*4.4)}
+  else{ctx.globalCompositeOperation='source-over';
+    const g=ctx.createRadialGradient(0,0,0,0,0,rs);
+    g.addColorStop(0,rgb(255,lerp(250,205,low),lerp(225,125,low)));
+    g.addColorStop(.75,rgb(255,lerp(215,135,low),lerp(140,55,low)));
+    g.addColorStop(.96,rgb(lerp(255,225,low),lerp(165,70,low),lerp(80,25,low)));
+    g.addColorStop(1,rgb(255,120,40,0));
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,rs,0,7);ctx.fill()}
+  ctx.restore();
+  orb(mx,my,R*1.3,'rgba(190,210,255,.45)','rgba(120,150,255,.25)',1);
+  const mr=R*.5;ctx.globalCompositeOperation='source-over';
+  ctx.drawImage(ext.moon||moonTex,mx-mr,my-mr,mr*2,mr*2);
+  requestAnimationFrame(draw)
+}
+requestAnimationFrame(draw);
+function set(v){target=clamp(v);sl.value=Math.round(target*100)}
+sl.addEventListener('input',()=>{target=sl.value/100});
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,t:target}});
+addEventListener('pointermove',e=>{if(drag)set(drag.t+(e.clientX-drag.x)/(W*.6))});
+addEventListener('pointerup',()=>drag=null);
+let live=false;
+function onOri(e){if(e.gamma==null)return;live=true;set(Math.abs(e.gamma)/70);hint.textContent='Cuanto más gires el móvil, más se hace de noche'}
+async function startHands(){
+  const say=m=>{handEl.textContent=m};
+  say('Cargando seguimiento de manos…');
+  try{
+    const V='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+    const {HandLandmarker,FilesetResolver}=await import(V+'/vision_bundle.mjs');
+    const fs=await FilesetResolver.forVisionTasks(V+'/wasm');
+    const opts=d=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:d},runningMode:'VIDEO',numHands:1});
+    let hl;try{hl=await HandLandmarker.createFromOptions(fs,opts('GPU'))}catch(e){hl=await HandLandmarker.createFromOptions(fs,opts('CPU'))}
+    say('Abre y cierra los dedos (pulgar e índice) para cambiar el tamaño del sol');
+    let last=-1;
+    const loop=()=>{
+      if(vid.readyState>=2&&vid.currentTime!==last){last=vid.currentTime;
+        const r=hl.detectForVideo(vid,performance.now()),p=r.landmarks&&r.landmarks[0];
+        if(p){const asp=vid.videoWidth/vid.videoHeight,dist=(a,b)=>Math.hypot((a.x-b.x)*asp,a.y-b.y);
+          const ratio=dist(p[4],p[8])/(dist(p[0],p[9])||1);
+          sizeT=lerp(.45,2.2,clamp((ratio-.12)/.9))}}
+      requestAnimationFrame(loop)};
+    loop();
+  }catch(e){say('No se pudo cargar el seguimiento de manos')}
+}
+async function enable(){
+  let sensor=false;
+  try{
+    if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){
+      sensor=(await DeviceOrientationEvent.requestPermission())==='granted';
+    }else sensor=true;
+    if(sensor)addEventListener('deviceorientation',onOri);
+  }catch(e){}
+  try{
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+    vid.srcObject=s;vid.play();startHands();
+  }catch(e){hint.textContent='Sin cámara. Se ve solo el cielo azul'}
+  btn.style.display='none';
+  if(!sensor)hint.textContent='Sin sensor. Usa el deslizador o arrastra la pantalla';
+  else setTimeout(()=>{if(!live)hint.textContent='Sin sensor aquí. Usa el deslizador o arrastra'},1500);
+}
+btn.addEventListener('click',enable);
+</script>
+</body>
+</html>
